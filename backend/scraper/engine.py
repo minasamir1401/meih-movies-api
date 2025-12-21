@@ -34,10 +34,13 @@ from bs4 import BeautifulSoup
 import httpx
 
 # ============================================================================
-# WINDOWS ASYNCIO FIX - MUST BE BEFORE ANY ASYNC CODE
+# OPTIONAL DEPENDENCIES
 # ============================================================================
-import nest_asyncio
-nest_asyncio.apply()
+try:
+    import nest_asyncio
+    nest_asyncio.apply()
+except ImportError:
+    pass
 
 if sys.platform == 'win32':
     # Use ProactorEventLoop for subprocess support on Windows
@@ -316,9 +319,15 @@ class ResourceResolver:
         """
         TIER 2: curl_cffi with browser TLS fingerprint impersonation.
         Bypasses TLS fingerprinting protection.
+        Only available if curl_cffi is installed.
         """
         try:
             from curl_cffi.requests import AsyncSession
+        except ImportError:
+            logger.debug("curl_cffi not installed, skipping Tier 2")
+            return None, 0
+        
+        try:
             async with AsyncSession() as session:
                 response = await session.get(
                     url,
@@ -327,9 +336,6 @@ class ResourceResolver:
                     allow_redirects=True,
                 )
                 return response.text, response.status_code
-        except ImportError:
-            logger.debug("curl_cffi not available, skipping Tier 2")
-            return None, 0
         except Exception as e:
             logger.warning(f"Tier 2 error for {url}: {e}")
             return None, 0
@@ -373,9 +379,15 @@ class ResourceResolver:
         """
         TIER 4: Playwright headless browser.
         Full JavaScript execution with stealth mode.
+        Only available if playwright is installed.
         """
         try:
             from playwright.async_api import async_playwright
+        except ImportError:
+            logger.debug("Playwright not installed, skipping Tier 4")
+            return None, 0
+        
+        try:
             
             async with self._browser_lock:
                 if self._playwright is None:
@@ -445,9 +457,6 @@ class ResourceResolver:
                 await page.close()
                 await context.close()
                 
-        except ImportError:
-            logger.debug("Playwright not available, skipping Tier 4")
-            return None, 0
         except Exception as e:
             logger.warning(f"Tier 4 error for {url}: {e}")
             return None, 0
