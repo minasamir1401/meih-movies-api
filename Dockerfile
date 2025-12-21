@@ -19,3 +19,4 @@ EXPOSE 10000
 
 # Run the application
 CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-10000}
+# Force rebuild
