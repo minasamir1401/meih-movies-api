@@ -1,0 +1,16 @@
+fastapi
+uvicorn
+gunicorn
+beautifulsoup4
+cloudscraper
+aiohttp
+pydantic
+python-multipart
+python-dotenv
+requests
+httpx[http2]
+curl_cffi
+fake-useragent
+tenacity
+lxml
+playwright==1.40.0
