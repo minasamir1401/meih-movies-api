@@ -36,6 +36,9 @@ import httpx
 # ============================================================================
 # WINDOWS ASYNCIO FIX - MUST BE BEFORE ANY ASYNC CODE
 # ============================================================================
+import nest_asyncio
+nest_asyncio.apply()
+
 if sys.platform == 'win32':
     # Use ProactorEventLoop for subprocess support on Windows
     try:
