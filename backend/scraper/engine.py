@@ -1,21 +1,20 @@
 """
-Production-Ready Hybrid Scraping Engine
+"""Production-Ready Hybrid Scraping Engine
 
 Multi-Tier Fallback Architecture:
   Tier 1: Direct HTTP request (httpx) - fastest, works when no protection
   Tier 2: curl_cffi with browser impersonation - bypasses TLS fingerprinting
   Tier 3: ScraperAPI proxy - when direct/curl fail (rate limited)
-  Tier 4: Playwright headless browser - for JS-rendered content
+  Tier 4: Node.js Stealth Proxy - browser-like headers without browser overhead
 
 Intelligent Detection:
   - 403 Forbidden → escalate to next tier
-  - JavaScript challenge → escalate to Playwright
+  - JavaScript challenge → escalate to Node.js proxy
   - Empty/short HTML → escalate to render mode
-  - Cloudflare/WAF → use stealth browser
+  - Cloudflare/WAF → use stealth headers
 
 Windows Compatibility:
   - Proper asyncio event loop policy
-  - Playwright subprocess handling
   - Non-blocking async operations
 """
 
@@ -151,9 +150,9 @@ class ResourceResolver:
                               │ JS rendering needed?
                               ▼
     ┌─────────────────────────────────────────────────────────────────┐
-    │ TIER 4: Playwright Headless Browser                             │
-    │ - Full JavaScript execution                                      │
-    │ - Stealth mode to avoid detection                               │
+    │ TIER 4: Node.js Stealth Proxy                                  │
+    │ - Browser-like headers without browser overhead                │
+    │ - Lightweight alternative to headless browser                  │
     └─────────────────────────────────────────────────────────────────┘
     """
     
@@ -186,11 +185,6 @@ class ResourceResolver:
         self.ROOT = self.NET_NODES[0]
         self.concurrency = asyncio.Semaphore(8)
         self.store = DiscoveryCache(capacity=800)
-        
-        # Playwright instance (lazy initialized)
-        self._playwright = None
-        self._browser = None
-        self._browser_lock = asyncio.Lock()
         
         # HTTP clients (reusable)
         self._http_client = None
@@ -376,88 +370,54 @@ class ResourceResolver:
             logger.warning(f"Tier 3 error for {url}: {e}")
             return None, 0
     
-    async def _tier4_playwright(self, url: str, wait_time: int = 3000) -> Tuple[Optional[str], int]:
+    async def _tier4_node_proxy(self, url: str, timeout: int = 15000) -> Tuple[Optional[str], int]:
         """
-        TIER 4: Playwright headless browser.
-        Full JavaScript execution with stealth mode.
-        Only available if playwright is installed.
+        TIER 4: Node.js Stealth Proxy.
+        Uses Node.js HTTP service with browser-like headers for anti-bot bypass.
+        Lighter and faster than headless browser.
         """
-        try:
-            from playwright.async_api import async_playwright
-        except ImportError:
-            logger.debug("Playwright not installed, skipping Tier 4")
-            return None, 0
+        # Node.js proxy service URL (can be configured via env)
+        proxy_url = os.environ.get('NODE_PROXY_URL', 'http://localhost:3001')
         
         try:
-            
-            async with self._browser_lock:
-                if self._playwright is None:
-                    self._playwright = await async_playwright().start()
+            async with httpx.AsyncClient(timeout=timeout/1000 + 5) as client:
+                response = await client.post(
+                    f"{proxy_url}/fetch",
+                    json={"url": url, "timeout": timeout},
+                    timeout=timeout/1000 + 5
+                )
                 
-                if self._browser is None:
-                    # Browser launch arguments
-                    args = [
-                        '--disable-blink-features=AutomationControlled',
-                        '--disable-dev-shm-usage',
-                        '--disable-gpu',
-                        '--no-first-run',
-                    ]
+                if response.status_code == 200:
+                    data = response.json()
+                    html = data.get('html', '')
+                    status = data.get('status', 0)
                     
-                    self._browser = await self._playwright.chromium.launch(
-                        headless=True,
-                        args=args
-                    )
-            
-            # Create context with stealth settings
-            context = await self._browser.new_context(
-                user_agent=random.choice(self.user_agents),
-                viewport={'width': random.randint(1200, 1920), 'height': random.randint(800, 1080)},
-                java_script_enabled=True,
-                bypass_csp=True,
-                ignore_https_errors=True,
-                locale='en-US',
-                timezone_id='America/New_York',
-            )
-            
-            # Stealth scripts
-            await context.add_init_script("""
-                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-                Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-                Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-                window.chrome = { runtime: {} };
-            """)
-            
-            page = await context.new_page()
-            
-            try:
-                response = await page.goto(url, wait_until='load', timeout=30000)
-                status_code = response.status if response else 0
-                
-                # Wait for dynamic content
-                await page.wait_for_timeout(wait_time)
-                
-                # Handle meta refresh redirects
-                content = await page.content()
-                if '<meta' in content.lower() and 'refresh' in content.lower():
-                    refresh_match = re.search(
-                        r'<meta[^>]*http-equiv=["\']?refresh["\']?[^>]*content=["\']?\d*;\s*url=([^"\'>]+)',
-                        content, re.IGNORECASE
-                    )
-                    if refresh_match:
-                        redirect_url = refresh_match.group(1).strip('"\'')
-                        if not redirect_url.startswith('http'):
-                            redirect_url = urljoin(url, redirect_url)
-                        logger.info(f"Following meta refresh to: {redirect_url}")
-                        await page.goto(redirect_url, wait_until='load', timeout=15000)
-                        await page.wait_for_timeout(2000)
-                        content = await page.content()
-                
-                return content, status_code
-                
-            finally:
-                await page.close()
-                await context.close()
-                
+                    if html and len(html) > 500:
+                        # Handle meta refresh redirects
+                        if '<meta' in html.lower() and 'refresh' in html.lower():
+                            refresh_match = re.search(
+                                r'<meta[^>]*http-equiv=["\']?refresh["\']?[^>]*content=["\']?\d*;\s*url=([^"\'>]+)',
+                                html, re.IGNORECASE
+                            )
+                            if refresh_match:
+                                redirect_url = refresh_match.group(1).strip('"\'')
+                                if not redirect_url.startswith('http'):
+                                    redirect_url = urljoin(url, redirect_url)
+                                logger.info(f"Following meta refresh to: {redirect_url}")
+                                # Fetch the redirect URL
+                                return await self._tier4_node_proxy(redirect_url, timeout)
+                        
+                        return html, status
+                    else:
+                        logger.debug(f"Tier 4 returned short content: {len(html) if html else 0} bytes")
+                        return None, status
+                else:
+                    logger.debug(f"Tier 4 proxy returned status {response.status_code}")
+                    return None, response.status_code
+                    
+        except httpx.ConnectError:
+            logger.debug("Node.js proxy service not available, skipping Tier 4")
+            return None, 0
         except Exception as e:
             logger.warning(f"Tier 4 error for {url}: {e}")
             return None, 0
@@ -550,10 +510,10 @@ class ResourceResolver:
                 elif content:
                     logger.info(f"[TIER 3] Failed with status {status_code}")
             
-            # TIER 4: Playwright
+            # TIER 4: Node.js Proxy
             if not content and (force_tier == 0 or force_tier == 4):
-                logger.info(f"[TIER 4] Playwright fetch: {endpoint[:60]}...")
-                content, status_code = await self._tier4_playwright(endpoint)
+                logger.info(f"[TIER 4] Node.js proxy fetch: {endpoint[:60]}...")
+                content, status_code = await self._tier4_node_proxy(endpoint)
                 
                 if content and len(content) > 500:
                     self._update_stats('tier4_success')
@@ -958,12 +918,6 @@ class ResourceResolver:
         """Cleanup resources"""
         if self._http_client and not self._http_client.is_closed:
             await self._http_client.aclose()
-        
-        if self._browser:
-            await self._browser.close()
-        
-        if self._playwright:
-            await self._playwright.stop()
         
         logger.info("Resources cleaned up")
 

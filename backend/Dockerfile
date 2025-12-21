@@ -6,6 +6,7 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
 ENV PORT 10000
+ENV NODE_PROXY_URL http://proxy:3001
 
 # Install dependencies
 COPY requirements.txt .
