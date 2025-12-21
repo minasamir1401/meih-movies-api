@@ -39,7 +39,8 @@ import httpx
 try:
     import nest_asyncio
     nest_asyncio.apply()
-except ImportError:
+except (ImportError, ValueError):
+    # ValueError: Can't patch uvloop (used in production)
     pass
 
 if sys.platform == 'win32':
