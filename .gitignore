@@ -73,3 +73,7 @@ Thumbs.db
 *.bak
 *.tmp
 *.temp
+
+# Large files
+*.zip
+FRONTEND/
