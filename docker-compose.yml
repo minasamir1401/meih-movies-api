@@ -1,0 +1,30 @@
+# Multi-Service Docker Compose
+# Runs both Python backend API and Node.js proxy service
+
+version: '3.8'
+
+services:
+  # Main Python API service
+  api:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "10000:10000"
+    environment:
+      - NODE_PROXY_URL=http://proxy:3001
+      - PORT=10000
+    depends_on:
+      - proxy
+    restart: unless-stopped
+
+  # Node.js stealth proxy service
+  proxy:
+    build:
+      context: ./backend/proxy-service
+      dockerfile: Dockerfile.proxy
+    ports:
+      - "3001:3001"
+    environment:
+      - PROXY_PORT=3001
+    restart: unless-stopped
