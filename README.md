@@ -1,40 +1,52 @@
-# MEIH Movies API (Backend & Proxy)
+# MEIH Backend API
 
-نظام خلفي متكامل يوفر واجهة برمجة تطبيقات (API) لمنصة بث الأفلام والمسلسلات، مدمج معه خدمة بروكسي لتجاوز الحجب.
+This is the backend API for the MEIH Netflix clone project, built with FastAPI.
 
-## 🚀 المميزات
+## Features
+- Content scraping from various sources
+- RESTful API endpoints for content delivery
+- Caching mechanisms for improved performance
+- Multi-tier scraping with fallback strategies
+- Automatic handling of meta refresh redirects
 
-- **FastAPI**: أداء عالي وسرعة استجابة.
-- **Scraper Engine**: محرك قوي لجلب البيانات من المصادر.
-- **Integrated Proxy**: بروكسي Node.js مدمج لتجاوز حماية Cloudflare وغيرها.
-- **Keep-Alive**: نظام ذاتي لمنع السيرفر من الدخول في وضع السكون على Render.
+## Tech Stack
+- Python 3.10+
+- FastAPI
+- BeautifulSoup4
+- aiohttp
+- uvicorn
 
-## 🛠️ التثبيت والتشغيل محلياً
+## Setup Instructions
 
-1. **تثبيت المتطلبات**:
-
-   ```bash
+1. Clone the repository
+2. Install dependencies:
+   ```
    pip install -r requirements.txt
-   cd proxy-service && npm install
    ```
 
-2. **التشغيل**:
-   قم بتشغيل الملف المجمع:
-   ```bash
-   start-all.bat
+3. Run the server:
+   ```
+   python main.py
+   ```
+   Or with uvicorn directly:
+   ```
+   uvicorn main:app --host 0.0.0.0 --port 8000
    ```
 
-## ☁️ النشر على Render
+## API Endpoints
 
-هذا المشروع مهيأ للعمل كخدمة واحدة (Monorepo) على Render:
+- `GET /` - Health check
+- `GET /health` - Health status
+- `GET /content/latest` - Get latest content
+- `GET /content/search` - Search content
+- `GET /content/group/{cid}` - Get content by category
+- `GET /content/details/{entry_id}` - Get detailed content information
 
-1. اربط المستودع بخدمة Web Service.
-2. استخدم `Environment: Python`.
-3. **Build Command**: `bash setup_render.sh`
-4. **Start Command**: `bash start_render.sh`
-5. أضف المتغيرات البيئية:
-   - `NODE_PROXY_URL`: `http://localhost:3001`
+## Recent Fixes
 
----
+- Fixed handling of meta refresh redirects that were preventing content retrieval
+- Improved redirect following mechanism for better compatibility with source websites
 
-Developed by Mina Samir using Advanced AI Agents.
+## Deployment
+
+The backend is configured for deployment on Render. See the `render.yaml` file for configuration details.

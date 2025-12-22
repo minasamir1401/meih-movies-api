@@ -227,7 +227,7 @@ async def get_system_logs():
 @app.on_event("startup")
 async def startup_event():
     print("\n" + "="*50)
-    print("🚀 MEIH BACKEND IS READY AND WAITING FOR REQUESTS")
+    print("🚀 MEIH BACKEND IS READY AND WAITING FOR REQUESTS (Refreshed)")
     print(f"📡 API Root: http://localhost:8000")
     print(f"🏥 Health Check: http://localhost:8000/health")
     print("="*50 + "\n")

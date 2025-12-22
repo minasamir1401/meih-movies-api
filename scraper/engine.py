@@ -296,6 +296,9 @@ class ResourceResolver:
             # Fast fail for direct connections
             async with session.get(url, headers=headers, ssl=False, timeout=5) as response:
                 text = await response.text()
+                # Follow meta refresh redirects if present
+                if text and '<meta' in text.lower():
+                    text = await self._follow_meta_refresh(text, url)
                 return text, response.status
         except Exception:
             return None, 0
@@ -389,6 +392,31 @@ class ResourceResolver:
                     new_url += f"?{parsed.query}"
                 return new_url
         return url
+
+    async def _follow_meta_refresh(self, html_content: str, original_url: str) -> str:
+        """Follow meta refresh redirects in HTML content"""
+        if not html_content or '<meta' not in html_content.lower():
+            return html_content
+        
+        # Look for meta refresh tags
+        meta_refresh_match = re.search(r'<meta[^>]*http-equiv=["\']?refresh["\']?[^>]*content=["\']?\d+;\s*url=([^"\'>]+)["\']?', html_content, re.IGNORECASE)
+        if meta_refresh_match:
+            refresh_url = meta_refresh_match.group(1).strip()
+            # Make URL absolute if it's relative
+            if not refresh_url.startswith('http'):
+                refresh_url = urljoin(original_url, refresh_url)
+            
+            # Fetch the redirected content
+            try:
+                headers = self._generate_headers(original_url)
+                session = await self._get_session()
+                async with session.get(refresh_url, headers=headers, ssl=False, timeout=10) as response:
+                    if response.status == 200:
+                        return await response.text()
+            except Exception as e:
+                logger.warning(f"Failed to follow meta refresh redirect to {refresh_url}: {e}")
+        
+        return html_content
 
     async def _invoke_remote(self, endpoint: str, ref: Optional[str] = None, force_tier: int = 0) -> str:
         # 0. Heal URL before requesting
