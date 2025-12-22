@@ -24,6 +24,9 @@ RUN pip install --no-cache-dir --upgrade -r requirements.txt
 # Copy the entire backend directory contents into /app
 COPY backend/ .
 
+# Force copy the latest start_render.sh to ensure we use the updated version
+COPY backend/start_render.sh ./start_render.sh
+
 # Install Proxy dependencies
 # Now /app/proxy-service exists because we copied backend/ content to /app
 RUN cd proxy-service && npm install
