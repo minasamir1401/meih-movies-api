@@ -1006,17 +1006,42 @@ class ResourceResolver:
     
     async def get_latest_content(self, p: int = 1) -> List[Dict]:
         target_path = f"newvideos1.php?page={p}"
+        
+        # Try primary domain first
         raw = await self._invoke_remote(f"{self.ROOT}/{target_path}")
+        
+        # If failed, try all alternative domains
+        if not raw:
+            logger.warning(f"Primary domain failed for latest content page {p}, trying alternatives...")
+            for alt_domain in self.NET_NODES:
+                if alt_domain != self.ROOT:
+                    try:
+                        logger.info(f"Trying alternative domain: {alt_domain}")
+                        raw = await self._invoke_remote(f"{alt_domain}/{target_path}")
+                        if raw:
+                            logger.info(f"Success with alternative domain: {alt_domain}")
+                            break
+                    except Exception as e:
+                        logger.error(f"Failed with {alt_domain}: {e}")
+                        continue
         
         # Fallback 1: Try newvideos.php
         if not raw and p == 1:
+            logger.info("Trying fallback: newvideos.php")
             raw = await self._invoke_remote(f"{self.ROOT}/newvideos.php")
             
         # Fallback 2: Try ROOT directly for page 1
         if not raw and p == 1:
+            logger.info("Trying fallback: ROOT homepage")
             raw = await self._invoke_remote(self.ROOT)
+        
+        result = self._map_content_grid(raw)
+        logger.info(f"Extracted {len(result)} items from latest content page {p}")
+        
+        if not result:
+            logger.error(f"No content extracted! Raw HTML length: {len(raw) if raw else 0}")
             
-        return self._map_content_grid(raw)
+        return result
     
     async def search_content(self, query: str) -> List[Dict]:
         # Search for content
