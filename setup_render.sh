@@ -2,11 +2,17 @@
 
 # Setup script for Render deployment (Non-Root Version)
 
-echo "Starting Render setup..."
+echo "Setting up Render environment..."
 
 # 1. Install Python dependencies
 echo "Installing Python dependencies..."
-pip install --no-cache-dir --upgrade -r requirements.txt
+pip install --upgrade pip
+pip install -r requirements.txt
+
+# Install Playwright browsers (headless)
+echo "Installing Playwright browsers..."
+playwright install chromium
+playwright install-deps chromium
 
 # 2. Install Node.js locally (without root/sudo)
 echo "Installing Node.js locally..."
