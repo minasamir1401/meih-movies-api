@@ -156,7 +156,8 @@ class ResourceResolver:
     # +---------------------------------------------------------------+
     
     # Provider domains (configurable via environment)
-    NET_NODES = os.getenv("NETWORK_NODES", "https://larooza.icu,https://q.larozavideo.net,https://larooza.video,https://larooza.site,https://larooza.tv,https://larooza.net").split(',')
+    # Updated domains for Larooza (Discovery Nodes)
+    NET_NODES = os.getenv("NETWORK_NODES", "https://larooza.site,https://larooza.video,https://larooza.net,https://larooza.tv,https://larooza.icu,https://q.larozavideo.net").split(',')
     
     # Detection patterns for anti-bot protection
     PROTECTION_PATTERNS = [
@@ -258,28 +259,28 @@ class ResourceResolver:
     
     def _is_blocked(self, content: str, status_code: int) -> Tuple[bool, str]:
         # Detect if response indicates blocking/protection.
-        # Returns (is_blocked, reason)
-        if status_code == 403:
-            return True, "HTTP 403 Forbidden"
+        if status_code in [403, 429]:
+            return True, f"HTTP {status_code}"
         
-        if status_code == 503:
-            return True, "HTTP 503 Service Unavailable (possible WAF)"
+        if status_code == 503 and ("cloudflare" in content.lower() or "ddos-guard" in content.lower()):
+            return True, "WAF Protection Active (503)"
+
+        if not content or len(content) < 100: # Reduced threshold to catch smaller valid responses
+            return True, f"Empty or tiny content ({len(content) if content else 0} bytes)"
         
-        if status_code == 429:
-            return True, "HTTP 429 Rate Limited"
+        content_lower = content.lower()[:3000] # Check more of the content
         
-        if not content or len(content) < 500:
-            return True, f"Suspiciously short content ({len(content) if content else 0} bytes)"
-        
-        content_lower = content.lower()[:2000]
-        for pattern in self.PROTECTION_PATTERNS:
-            if pattern in content_lower:
-                return True, f"Protection pattern detected: {pattern}"
-        
-        # Check for JavaScript challenge
-        if '<noscript>' in content_lower and 'enable javascript' in content_lower:
-            return True, "JavaScript challenge detected"
-        
+        # Priority check for Cloudflare specific challenges
+        if "just a moment" in content_lower or "checking your browser" in content_lower:
+            return True, "Cloudflare JS Challenge"
+            
+        if "access denied" in content_lower and "cloudflare" in content_lower:
+            return True, "Cloudflare Access Denied"
+
+        # If we see common UI elements, it's NOT blocked even if some patterns match
+        if any(x in content_lower for x in ['video-item', 'post-title', 'ellipsis', 'play.php', 'vid=']):
+            return False, ""
+
         return False, ""
     
     async def _get_session(self) -> aiohttp.ClientSession:
@@ -344,7 +345,7 @@ class ResourceResolver:
             logger.warning(f"Tier 3 error for {url}: {e}")
             return None, 0
     
-    async def _tier4_node_proxy(self, url: str, timeout: int = 15000) -> Tuple[Optional[str], int]:
+    async def _tier4_node_proxy(self, url: str, timeout: int = 45000) -> Tuple[Optional[str], int]:
         # TIER 4: Node.js Stealth Proxy with meta-redirect tracking
         proxy_url = os.environ.get('NODE_PROXY_URL', 'http://localhost:3001')
         try:
@@ -352,7 +353,7 @@ class ResourceResolver:
             async with session.post(
                 f"{proxy_url}/fetch",
                 json={"url": url, "timeout": timeout},
-                timeout=25
+                timeout=60
             ) as response:
                 if response.status == 200:
                     data = await response.json()
@@ -673,7 +674,7 @@ class ResourceResolver:
             logger.error(f"Error resolving download vectors: {e}")
             return []
     
-    def _process_node_matrix(self, raw: str) -> List[Dict]:
+    def _process_node_matrix(self, raw: str, current_vid: Optional[str] = None) -> List[Dict]:
         """Deep video server discovery using structural analysis and regex"""
         if not raw: return []
         
@@ -688,12 +689,21 @@ class ResourceResolver:
             url = self._heal_url(url)
             if not url.startswith('http'):
                 if len(url) > 5 and len(url) < 20 and not '/' in url: # Likely a VID
+                    # Only add if it's the requested VID OR we don't have a specific VID context
+                    if current_vid and url != current_vid:
+                         return
                     url = urljoin(self.ROOT, f"play.php?vid={url}")
                 else:
                     url = urljoin(self.ROOT, url)
             
-            # Filter
-            if any(x in url.lower() for x in ['facebook', 'twitter', 'google', 'ad-network']):
+            # Filter unrelated videos if we have a current_vid
+            if current_vid and 'vid=' in url and current_vid not in url:
+                # Keep only if it's a known cloud provider even if it has a vid param
+                if not any(x in url.lower() for x in ['vidoza', 'streamtape', 'doodstream', 'ok.ru', 'upstream']):
+                    return
+
+            # Filter social/ads
+            if any(x in url.lower() for x in ['facebook', 'twitter', 'google', 'ad-network', 'contact', 'about']):
                  return
             
             if url not in seen_urls:
@@ -714,7 +724,8 @@ class ResourceResolver:
             'div[data-url]', 'a[data-vid]', '.server-item',
             'ul.WatchList li', '[data-embed-url]', '[data-embed-id]',
             '.server-link', '.sv-item', '.play-btn', '.video-source',
-            '.servers-div li', '.servers a'
+            '.servers-div li', '.servers a', '.p-servers li', '.v-server',
+            '.server-box', 'a.server-li', '.server-tab a'
         ]
 
         for selector in selectors:
@@ -737,20 +748,26 @@ class ResourceResolver:
 
                 if u: add_server(u, item.get_text(strip=True))
 
-        # 3. Script Scanning (Deep Discovery)
-        scripts = s.find_all('script')
-        for script in scripts:
-            if not script.string: continue
-            
-            # Search for play.php?vid= patterns
-            vids = re.findall(r'play\.php\?vid=([a-zA-Z0-9]+)', script.string)
-            for v in vids:
-                add_server(f"play.php?vid={v}", f"Mirror {v[:4]}")
-            
-            # Search for raw embed URLs
-            embeds = re.findall(r'[\'"](https?://[^\'"]+(vidoza|streamtape|doodstream|ok\.ru|feurl|upstream)[^\'"]+)[\'"]', script.string)
-            for e_match in embeds:
-                add_server(e_match[0], f"Cloud {e_match[1].capitalize()}")
+        # 3. Script & Text Scanning (Deep Discovery)
+        # Search for play.php?vid= patterns
+        vids = re.findall(r'(?:play\.php\?vid=|id=|vid=)([a-zA-Z0-9]{5,15})', raw)
+        for v in vids:
+            # If we have a current_vid, only add if it matches
+            if current_vid and v != current_vid:
+                continue
+            add_server(f"play.php?vid={v}", f"Main Mirror")
+        
+        # Search for raw embed URLs
+        embeds = re.findall(r'[\'"](https?://[^\'"]+(?:vidoza|streamtape|doodstream|ok\.ru|feurl|upstream|uqload|vidmoly|voe\.sx|mixdrop|streamvid)[^\'"]+)[\'"]', raw)
+        for e_match in embeds:
+            url = e_match[0] if isinstance(e_match, tuple) else e_match
+            # Detect provider name from URL
+            provider = "Cloud"
+            for p in ['vidoza', 'streamtape', 'doodstream', 'ok.ru', 'uqload', 'vidmoly', 'voe', 'mixdrop']:
+                if p in url.lower():
+                    provider = p.capitalize()
+                    break
+            add_server(url, f"{provider} Server")
 
         logger.info(f"[SCRAPER] Matrix Discovery: {len(matrix)} servers found for {self.ROOT}")
         return matrix[:20] # Limit to top 20 for performance
@@ -759,11 +776,14 @@ class ResourceResolver:
         # Fetch and extract video servers
         try:
             raw = await asyncio.wait_for(self._invoke_remote(path, ref=origin), timeout=20.0)
-            matrix = self._process_node_matrix(raw)
+            # Extract VID from path if possible for filtering
+            v_match = re.search(r'vid=([^&]+)', path)
+            target_vid = v_match.group(1) if v_match else None
+            matrix = self._process_node_matrix(raw, current_vid=target_vid)
             if len(matrix) < 2:
                 # Try with higher tier
                 raw = await self._invoke_remote(path, ref=origin, force_tier=4)
-                matrix = self._process_node_matrix(raw)
+                matrix = self._process_node_matrix(raw, current_vid=target_vid)
             return matrix[:12]
         except asyncio.TimeoutError:
             logger.warning(f"Timeout resolving source matrix for {path}")
@@ -876,12 +896,22 @@ class ResourceResolver:
                 v_match = re.search(r'video-([a-f0-9]+)-', entry_url)
             vid = v_match.group(1) if v_match else None
             
-            # Extract title
+            # Extract title with higher precision
             title_node = soup.find('h1')
-            label = title_node.get_text(strip=True) if title_node else "Content"
+            meta_title = soup.find('meta', property='og:title') or soup.find('meta', name='twitter:title')
+            if meta_title and meta_title.get('content'):
+                label = meta_title['content'].split('|')[0].split('-')[0].strip()
+            elif title_node:
+                label = title_node.get_text(strip=True)
+            else:
+                label = soup.title.get_text(strip=True) if soup.title else "Content"
+            
+            # Clean title for common suffixes
+            for suffix in ["فيديو لاروزا", "لاروزا فيديو", "لاروزا تي في", "Laroza"]:
+                label = label.replace(suffix, "").strip(" -|")
             
             # Extract from main page
-            main_matrix = self._process_node_matrix(raw_main)
+            main_matrix = self._process_node_matrix(raw_main, current_vid=vid)
             main_vectors = self._resolve_vectors_from_soup(soup)
             
             # Parallel fetch if needed
@@ -916,11 +946,14 @@ class ResourceResolver:
             vectors = remote_vectors if remote_vectors else main_vectors
             
             # Extract description
-            desc_node = soup.select_one('.video-description, .description, p')
-            summary = desc_node.get_text(strip=True) if desc_node else ""
+            desc_node = soup.select_one('.video-description, .description, p, meta[name="description"]')
+            if desc_node and desc_node.name == 'meta':
+                 summary = desc_node.get('content', '')
+            else:
+                 summary = desc_node.get_text(strip=True) if desc_node else ""
             
             # Extract poster
-            asset_img = soup.select_one('.video-poster img, .movie-poster img, .postBlock img, .post-thumbnail img, .single-poster img, meta[property="og:image"]')
+            asset_img = soup.select_one('.video-poster img, .movie-poster img, .postBlock img, .post-thumbnail img, .single-poster img, meta[property="og:image"], meta[name="twitter:image"]')
             asset_p = ""
             if asset_img:
                 if asset_img.name == 'meta':
@@ -972,8 +1005,17 @@ class ResourceResolver:
             return {"title": "Unavailable", "servers": [], "episodes": [], "download_links": []}
     
     async def get_latest_content(self, p: int = 1) -> List[Dict]:
-        # Fetch latest content from homepage
-        raw = await self._invoke_remote(f"{self.ROOT}/newvideos1.php?page={p}")
+        target_path = f"newvideos1.php?page={p}"
+        raw = await self._invoke_remote(f"{self.ROOT}/{target_path}")
+        
+        # Fallback 1: Try newvideos.php
+        if not raw and p == 1:
+            raw = await self._invoke_remote(f"{self.ROOT}/newvideos.php")
+            
+        # Fallback 2: Try ROOT directly for page 1
+        if not raw and p == 1:
+            raw = await self._invoke_remote(self.ROOT)
+            
         return self._map_content_grid(raw)
     
     async def search_content(self, query: str) -> List[Dict]:
@@ -982,8 +1024,15 @@ class ResourceResolver:
         return self._map_content_grid(raw)
     
     async def get_category_content(self, cid: str, p: int = 1) -> List[Dict]:
-        # Fetch content from category
-        raw = await self._invoke_remote(f"{self.ROOT}/browse-{cid}-videos-{p}-date.html")
+        # Pattern 1: Classic Larooza
+        url1 = f"{self.ROOT}/browse-{cid}-videos-{p}-date.html"
+        # Pattern 2: Search-like CID or category.php
+        url2 = f"{self.ROOT}/category.php?cat={cid}&page={p}"
+        
+        raw = await self._invoke_remote(url1)
+        if not raw:
+            raw = await self._invoke_remote(url2)
+            
         return self._map_content_grid(raw)
     
     async def cleanup(self):

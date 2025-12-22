@@ -10,5 +10,5 @@ cd proxy-service
 nohup node server.js > proxy.log 2>&1 &
 cd ..
 
-# Start the FastAPI application
-exec gunicorn -w 4 -k uvicorn.workers.UvicornWorker main:app
+# Start the FastAPI application with optimized workers for Render Free Tier (512MB RAM)
+exec gunicorn -w 2 -k uvicorn.workers.UvicornWorker main:app --bind 0.0.0.0:$PORT

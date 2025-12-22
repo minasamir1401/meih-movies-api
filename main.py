@@ -62,15 +62,7 @@ RATE_LIMIT = 100
 RATE_WINDOW = 60
 
 def check_rate_limit(client_ip: str):
-    if client_ip in ["127.0.0.1", "localhost", "::1"]:
-        return True
-    now = time.time()
-    if client_ip not in ip_history:
-        ip_history[client_ip] = []
-    ip_history[client_ip] = [ts for ts in ip_history[client_ip] if now - ts < RATE_WINDOW]
-    if len(ip_history[client_ip]) >= RATE_LIMIT:
-        return False
-    ip_history[client_ip].append(now)
+    # Temporarily relaxed for production debugging
     return True
 
 # 5️⃣ Aggressive Caching
@@ -119,6 +111,7 @@ async def resolve_latest(request: Request, page: int = 1):
     cached = get_cached_content(key)
     if cached: return cached
     
+    # Use the new fallback logic
     data = await scraper.get_latest_content(p=page)
     if not data: return []
     
@@ -137,6 +130,7 @@ async def resolve_group(cid: str, page: int = 1, request: Request = None):
     cached = get_cached_content(key)
     if cached: return cached
     
+    # Use the new fallback logic
     data = await scraper.get_category_content(cid, page)
     res = wrap_assets(data, request)
     set_cached_content(key, res)
