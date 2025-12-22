@@ -417,16 +417,18 @@ class ResourceResolver:
                 logger.info(f"[TIER 1] Direct fetch: {endpoint[:60]}...")
                 content, status_code = await self._tier1_direct(endpoint, headers)
                 
+                # Check for empty or blocked content even if 200 OK
                 if content and status_code == 200:
                     is_blocked, reason = self._is_blocked(content, status_code)
-                    if not is_blocked:
+                    if not is_blocked and len(content) > 500: # Ensure substantial content
                         self._update_stats('tier1_success')
                         successful_tier = 1
                     else:
-                        logger.info(f"[TIER 1] Blocked: {reason}")
-                        content = None
+                        logger.info(f"[TIER 1] Blocked or Empty ({len(content)}b): {reason if is_blocked else 'Insufficient Length'}")
+                        content = None # Force escalation
                 else:
                     logger.info(f"[TIER 1] Failed with status {status_code}")
+                    content = None
             
             # TIER 2: curl_cffi
             if not content and (force_tier == 0 or force_tier == 2):
