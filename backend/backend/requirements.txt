@@ -1,0 +1,14 @@
+fastapi
+uvicorn[standard]
+gunicorn
+beautifulsoup4
+aiohttp
+pydantic
+python-multipart
+python-dotenv
+requests
+httpx[http2]
+fake-useragent
+tenacity
+lxml
+nest_asyncio

@@ -1,0 +1,34 @@
+{
+  "entry_url": "https://larooza.site/video.php?vid=1d5b27197",
+  "play_url": "https://larooza.site/play.php?vid=1d5b27197",
+  "main_page_servers": 2,
+  "play_page_servers": 3,
+  "combined_servers": 5,
+  "servers": [
+    {
+      "name": "سيرفر 1",
+      "url": "https://qq.okprime.site/embed-6o1nplljbyuf.html",
+      "type": "iframe"
+    },
+    {
+      "name": "سيرفر 2",
+      "url": "https://rty1.film77.xyz/embed-t5mixqtn2dw8.html",
+      "type": "iframe"
+    },
+    {
+      "name": "سيرفر 3",
+      "url": "https://uqload.to/e/crz13fpzjqhp.html",
+      "type": "iframe"
+    },
+    {
+      "name": "Video Server 1",
+      "url": "https://larooza.site/video.php?vid=1d5b27197",
+      "type": "iframe"
+    },
+    {
+      "name": "Embed Server 2",
+      "url": "https://larooza.site/embed.php?vid=1d5b27197",
+      "type": "iframe"
+    }
+  ]
+}

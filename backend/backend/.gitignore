@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+venv/
+.env
+.vscode/
+netflix_clone.db
+upload_to_hf.py
+test_scraper_v2.py
+*.bat
+logs/
+*.log
