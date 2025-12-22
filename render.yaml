@@ -1,8 +1,9 @@
 services:
   - type: web
     name: meih-movies-api
-    env: docker
-    plan: free
+    env: python
+    buildCommand: bash setup_render.sh
+    startCommand: bash start_render.sh
     envVars:
       - key: PORT
         value: 10000
