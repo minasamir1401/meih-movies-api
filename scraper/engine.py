@@ -441,28 +441,28 @@ class ResourceResolver:
             status_code = 0
             successful_tier = 0
             
-            # TIER 1: Direct HTTP
+            # TIER 1: Node.js Proxy (FIRST - Best for Cloudflare bypass)
             if force_tier == 0 or force_tier == 1:
-                logger.info(f"[TIER 1] Direct fetch: {endpoint[:60]}...")
-                content, status_code = await self._tier1_direct(endpoint, headers)
+                node_proxy = os.environ.get('NODE_PROXY_URL', 'http://localhost:3001')
+                logger.info(f"[TIER 1] Node.js proxy fetch ({node_proxy}): {endpoint[:60]}...")
+                content, status_code = await self._tier4_node_proxy(endpoint)
                 
-                # Check for empty or blocked content even if 200 OK
-                if content and status_code == 200:
+                if content and len(content) > 500:
                     is_blocked, reason = self._is_blocked(content, status_code)
-                    if not is_blocked and len(content) > 500: # Ensure substantial content
+                    if not is_blocked:
                         self._update_stats('tier1_success')
                         successful_tier = 1
                     else:
-                        logger.info(f"[TIER 1] Blocked or Empty ({len(content)}b): {reason if is_blocked else 'Insufficient Length'}")
-                        content = None # Force escalation
+                        logger.warning(f"[TIER 1] Blocked: {reason}")
+                        content = None
                 else:
-                    logger.info(f"[TIER 1] Failed with status {status_code}")
+                    logger.warning(f"[TIER 1] Failed or empty response")
                     content = None
             
-            # TIER 2: curl_cffi
+            # TIER 2: Direct HTTP (Fallback)
             if not content and (force_tier == 0 or force_tier == 2):
-                logger.info(f"[TIER 2] curl_cffi fetch: {endpoint[:60]}...")
-                content, status_code = await self._tier2_curl_cffi(endpoint)
+                logger.info(f"[TIER 2] Direct fetch: {endpoint[:60]}...")
+                content, status_code = await self._tier1_direct(endpoint, headers)
                 
                 if content and status_code == 200:
                     is_blocked, reason = self._is_blocked(content, status_code)
@@ -475,10 +475,10 @@ class ResourceResolver:
                 elif content:
                     logger.info(f"[TIER 2] Failed with status {status_code}")
             
-            # TIER 3: ScraperAPI (skip if credits known to be exhausted)
-            if not content and (force_tier == 0 or force_tier == 3) and self.token:
-                logger.info(f"[TIER 3] ScraperAPI fetch: {endpoint[:60]}...")
-                content, status_code = await self._tier3_scraperapi(endpoint, render=False)
+            # TIER 3: curl_cffi (TLS Fingerprint Bypass)
+            if not content and (force_tier == 0 or force_tier == 3):
+                logger.info(f"[TIER 3] curl_cffi fetch: {endpoint[:60]}...")
+                content, status_code = await self._tier2_curl_cffi(endpoint) # Corrected function name and arguments
                 
                 if content and status_code == 200:
                     is_blocked, reason = self._is_blocked(content, status_code)
@@ -486,32 +486,35 @@ class ResourceResolver:
                         self._update_stats('tier3_success')
                         successful_tier = 3
                     else:
-                        # Try render mode
-                        logger.info(f"[TIER 3] Blocked, trying render mode: {reason}")
+                        logger.info(f"[TIER 3] Blocked: {reason}")
+                        content = None
+                elif content:
+                    logger.info(f"[TIER 3] Failed with status {status_code}")
+            
+            # TIER 4: ScraperAPI (Last resort - costs money)
+            if not content and (force_tier == 0 or force_tier == 4) and self.token: # Added self.token check
+                logger.info(f"[TIER 4] ScraperAPI fetch: {endpoint[:60]}...")
+                content, status_code = await self._tier3_scraperapi(endpoint, render=False)
+                
+                if content and status_code == 200:
+                    is_blocked, reason = self._is_blocked(content, status_code)
+                    if not is_blocked:
+                        self._update_stats('tier4_success')
+                        successful_tier = 4
+                    else:
+                        logger.info(f"[TIER 4] Blocked, trying render mode: {reason}")
                         content, status_code = await self._tier3_scraperapi(endpoint, render=True)
                         if content and status_code == 200:
                             is_blocked, _ = self._is_blocked(content, status_code)
                             if not is_blocked:
-                                self._update_stats('tier3_success')
-                                successful_tier = 3
+                                self._update_stats('tier4_success')
+                                successful_tier = 4
                             else:
                                 content = None
                         else:
                             content = None
                 elif content:
-                    logger.info(f"[TIER 3] Failed with status {status_code}")
-            
-            # TIER 4: Node.js Proxy
-            if not content and (force_tier == 0 or force_tier == 4):
-                node_proxy = os.environ.get('NODE_PROXY_URL', 'http://localhost:3001')
-                logger.info(f"[TIER 4] Node.js proxy fetch ({node_proxy}): {endpoint[:60]}...")
-                content, status_code = await self._tier4_node_proxy(endpoint)
-                
-                if content and len(content) > 500:
-                    self._update_stats('tier4_success')
-                    successful_tier = 4
-                else:
-                    content = None
+                    logger.info(f"[TIER 4] Failed with status {status_code}")
             
             # Final result
             if content and successful_tier > 0:
