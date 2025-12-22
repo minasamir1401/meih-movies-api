@@ -2,21 +2,34 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# Set up environment
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
-ENV PORT 10000
-ENV NODE_PROXY_URL http://proxy:3001
+# Set environment
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PORT=10000 \
+    NODE_PROXY_URL=http://localhost:3001
 
-# Install dependencies
+# Install system dependencies + Node.js (Version 18)
+RUN apt-get update && apt-get install -y curl gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
+    && apt-get install -y nodejs \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python requirements
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade -r requirements.txt
 
 # Copy application code
 COPY . .
 
+# Install Proxy dependencies (fix for npm install)
+RUN cd proxy-service && npm install
+
+# Fix executable permissions for scripts
+RUN chmod +x setup_render.sh start_render.sh
+
 # Expose port
 EXPOSE 10000
 
-# Run the application
-CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-10000}
+# Start command
+CMD ["bash", "start_render.sh"]

@@ -1,9 +1,13 @@
 """Quick test for the new multi-tier scraping engine"""
 import asyncio
 import sys
+import os
+
+# Disable uvloop on Windows
+os.environ['UVLOOP'] = '0'
 
 if sys.platform == 'win32':
-    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 async def test_engine():
     from scraper.engine import scraper

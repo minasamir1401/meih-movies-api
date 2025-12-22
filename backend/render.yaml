@@ -5,5 +5,7 @@ services:
     buildCommand: bash setup_render.sh
     startCommand: bash start_render.sh
     envVars:
+      - key: PORT
+        value: 10000
       - key: PYTHON_VERSION
         value: 3.10.0
