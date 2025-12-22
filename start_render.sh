@@ -5,9 +5,9 @@
 echo "Starting application..."
 
 # Start Proxy Service in background
-echo "Starting Proxy Service..."
+echo "Starting Proxy Service directly..."
 cd proxy-service
-pm2 start server.js --name "stealth-proxy"
+nohup node server.js > proxy.log 2>&1 &
 cd ..
 
 # Start the FastAPI application

@@ -472,7 +472,8 @@ class ResourceResolver:
             
             # TIER 4: Node.js Proxy
             if not content and (force_tier == 0 or force_tier == 4):
-                logger.info(f"[TIER 4] Node.js proxy fetch: {endpoint[:60]}...")
+                node_proxy = os.environ.get('NODE_PROXY_URL', 'http://localhost:3001')
+                logger.info(f"[TIER 4] Node.js proxy fetch ({node_proxy}): {endpoint[:60]}...")
                 content, status_code = await self._tier4_node_proxy(endpoint)
                 
                 if content and len(content) > 500:
