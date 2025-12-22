@@ -53,8 +53,30 @@ async def log_requests(request: Request, call_next):
         return JSONResponse(status_code=500, content={"error": "Internal Server Error", "detail": str(e)})
 
 @app.get("/health")
-async def health_check():
-    return {"status": "ok", "timestamp": time.time(), "workers": scraper._concurrency_limit}
+async def health():
+    return {"status": "ok", "timestamp": time.time(), "workers": os.cpu_count()}
+
+@app.get("/debug/domains")
+async def test_domains():
+    """Test all Larooza domains to see which ones are accessible"""
+    results = []
+    for domain in scraper.NET_NODES:
+        try:
+            test_url = f"{domain}/newvideos1.php"
+            raw = await scraper._invoke_remote(test_url)
+            status = "✅ Working" if raw and len(raw) > 1000 else "⚠️ Short response"
+            results.append({
+                "domain": domain,
+                "status": status,
+                "content_length": len(raw) if raw else 0
+            })
+        except Exception as e:
+            results.append({
+                "domain": domain,
+                "status": f"❌ Error: {str(e)}",
+                "content_length": 0
+            })
+    return {"tested_domains": results, "total": len(results)}
 
 # 3️⃣ Rate Limiting & Throttling (Simplified)
 ip_history = {}
