@@ -374,49 +374,85 @@ class ResourceResolver:
         except Exception:
             return None, 0
     
-    async def _tier4_node_proxy(self, url: str, timeout: int = 25) -> Tuple[Optional[str], int]:
-        # ... existing implementation ...
-        pass
+    async def _tier4_node_proxy(self, url: str, timeout: int = 25000) -> Tuple[Optional[str], int]:
+        # TIER 4: Node.js Stealth Proxy with meta-redirect tracking
+        proxy_url = os.environ.get('NODE_PROXY_URL', 'http://localhost:3001')
+        try:
+            session = await self._get_session()
+            async with session.post(
+                f"{proxy_url}/fetch",
+                json={"url": url, "timeout": timeout},
+                timeout=25
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    html = data.get('html', '')
+                    status = data.get('status', 0)
+                    
+                    if html and len(html) > 500:
+                        # Follow meta refresh redirects often used by Larooza
+                        if '<meta' in html.lower() and 'refresh' in html.lower():
+                            refresh_match = re.search(r'url=([^"\'>]+)', html, re.IGNORECASE)
+                            if refresh_match:
+                                redirect_u = refresh_match.group(1).strip()
+                                if not redirect_u.startswith('http'):
+                                    redirect_u = urljoin(url, redirect_u)
+                                return await self._tier4_node_proxy(redirect_u, timeout)
+                        return html, status
+                return None, response.status
+        except Exception as e:
+            logger.warning(f"Node.js proxy error for {url}: {e}")
+            return None, 0
 
     async def _tier5_playwright(self, url: str) -> Tuple[Optional[str], int]:
         """
-        TIER 5: Playwright (Headless Browser)
-        Bypasses Cloudflare by running a real Chrome browser instance.
+        TIER 5: Playwright (Optimized for Low RAM)
+        Bypasses Cloudflare with minimal resource usage.
         """
-        logger.info(f"Starting Playwright for: {url}")
+        logger.info(f"Starting Playwright (Low RAM) for: {url}")
         browser = None
         try:
             from playwright.async_api import async_playwright
             async with async_playwright() as p:
-                # Launch browser with arguments to minimize resource usage
+                # Launch with extreme memory saving flags
                 browser = await p.chromium.launch(
                     headless=True,
                     args=[
                         '--no-sandbox',
                         '--disable-setuid-sandbox',
-                        '--disable-dev-shm-usage',
-                        '--disable-gpu'
+                        '--disable-dev-shm-usage', # Critical for Docker/Render
+                        '--disable-gpu',
+                        '--no-zygote', # Saves RAM
+                        '--single-process', # Risks stability but saves RAM
+                        '--disable-extensions',
+                        '--mute-audio',
+                        '--disable-gl-drawing-for-tests',
                     ]
                 )
                 
-                # Create a new context with realistic user agent and viewport
+                # Create context with blocked resources
                 context = await browser.new_context(
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                    viewport={'width': 1280, 'height': 720}
+                    viewport={'width': 800, 'height': 600}, # Smaller viewport = less RAM
+                    java_script_enabled=True,
                 )
+                
+                # Block heavy resources (Images, Fonts, Media, CSS)
+                await context.route("**/*", lambda route: route.abort() 
+                    if route.request.resource_type in ["image", "media", "font", "stylesheet", "other"] 
+                    else route.continue_())
                 
                 page = await context.new_page()
                 
-                # Navigate and wait for content (up to 30 seconds)
-                response = await page.goto(url, wait_until='domcontentloaded', timeout=30000)
+                # Navigate faster with timeout
+                response = await page.goto(url, wait_until='domcontentloaded', timeout=25000)
                 
-                # Wait for Cloudflare challenge if present
+                # Check for Cloudflare
                 content = await page.content()
                 if "just a moment" in content.lower() or "checking your browser" in content.lower():
-                    logger.info("Cloudflare challenge detected, waiting...")
+                    logger.info("Cloudflare detected, waiting...")
                     await page.wait_for_timeout(5000)
                 
-                # Get final content
                 final_content = await page.content()
                 status = response.status if response else 0
                 
@@ -495,6 +531,10 @@ class ResourceResolver:
             self._update_stats('requests_made')
             headers = self._generate_headers(ref or self.ROOT)
             
+            # Initialize variables
+            content = None
+            successful_tier = 0
+            
             # Helper to check content validity
             def is_valid_content(c, s):
                 if not c or s != 200: return False
@@ -510,13 +550,13 @@ class ResourceResolver:
             # This runs a real browser to bypass Cloudflare
             if force_tier == 0 or force_tier == 5:
                 logger.info(f"[TIER 5] Playwright fetch: {endpoint[:60]}...")
-                content, status_code = await self._tier5_playwright(endpoint)
+                pw_content, status_code = await self._tier5_playwright(endpoint)
                 
-                if is_valid_content(content, status_code):
+                if is_valid_content(pw_content, status_code):
                     self._update_stats('tier5_success')
                     logger.info(f"[SUCCESS] Playwright succeeded for: {endpoint[:60]}...")
-                    self.store.put(endpoint, content, ttl=3600)
-                    return content
+                    self.store.put(endpoint, pw_content, ttl=3600)
+                    return pw_content
                 else:
                     logger.warning(f"[TIER 5] Failed or blocked")
 
@@ -541,59 +581,61 @@ class ResourceResolver:
             # TIER 2: Direct HTTP (Fallback)
             if not content and (force_tier == 0 or force_tier == 2):
                 logger.info(f"[TIER 2] Direct fetch: {endpoint[:60]}...")
-                content, status_code = await self._tier1_direct(endpoint, headers)
+                direct_content, direct_status = await self._tier1_direct(endpoint, headers)
                 
-                if content and status_code == 200:
-                    is_blocked, reason = self._is_blocked(content, status_code)
+                if direct_content and direct_status == 200:
+                    is_blocked, reason = self._is_blocked(direct_content, direct_status)
                     if not is_blocked:
+                        content = direct_content
                         self._update_stats('tier2_success')
                         successful_tier = 2
                     else:
                         logger.info(f"[TIER 2] Blocked: {reason}")
-                        content = None
-                elif content:
-                    logger.info(f"[TIER 2] Failed with status {status_code}")
+                elif direct_content:
+                    logger.info(f"[TIER 2] Failed with status {direct_status}")
             
             # TIER 3: curl_cffi (TLS Fingerprint Bypass)
             if not content and (force_tier == 0 or force_tier == 3):
                 logger.info(f"[TIER 3] curl_cffi fetch: {endpoint[:60]}...")
-                content, status_code = await self._tier2_curl_cffi(endpoint) # Corrected function name and arguments
+                cffi_content, cffi_status = await self._tier2_curl_cffi(endpoint) # Corrected function name and arguments
                 
-                if content and status_code == 200:
-                    is_blocked, reason = self._is_blocked(content, status_code)
+                if cffi_content and cffi_status == 200:
+                    is_blocked, reason = self._is_blocked(cffi_content, cffi_status)
                     if not is_blocked:
+                        content = cffi_content
                         self._update_stats('tier3_success')
                         successful_tier = 3
                     else:
                         logger.info(f"[TIER 3] Blocked: {reason}")
-                        content = None
-                elif content:
-                    logger.info(f"[TIER 3] Failed with status {status_code}")
+                elif cffi_content:
+                    logger.info(f"[TIER 3] Failed with status {cffi_status}")
             
             # TIER 4: ScraperAPI (Last resort - costs money)
             if not content and (force_tier == 0 or force_tier == 4) and self.token: # Added self.token check
                 logger.info(f"[TIER 4] ScraperAPI fetch: {endpoint[:60]}...")
-                content, status_code = await self._tier3_scraperapi(endpoint, render=False)
+                api_content, api_status = await self._tier3_scraperapi(endpoint, render=False)
                 
-                if content and status_code == 200:
-                    is_blocked, reason = self._is_blocked(content, status_code)
+                if api_content and api_status == 200:
+                    is_blocked, reason = self._is_blocked(api_content, api_status)
                     if not is_blocked:
+                        content = api_content
                         self._update_stats('tier4_success')
                         successful_tier = 4
                     else:
                         logger.info(f"[TIER 4] Blocked, trying render mode: {reason}")
-                        content, status_code = await self._tier3_scraperapi(endpoint, render=True)
-                        if content and status_code == 200:
-                            is_blocked, _ = self._is_blocked(content, status_code)
+                        render_content, render_status = await self._tier3_scraperapi(endpoint, render=True)
+                        if render_content and render_status == 200:
+                            is_blocked, _ = self._is_blocked(render_content, render_status)
                             if not is_blocked:
+                                content = render_content
                                 self._update_stats('tier4_success')
                                 successful_tier = 4
                             else:
                                 content = None
                         else:
                             content = None
-                elif content:
-                    logger.info(f"[TIER 4] Failed with status {status_code}")
+                elif api_content:
+                    logger.info(f"[TIER 4] Failed with status {api_status}")
             
             # Final result
             if content and successful_tier > 0:
