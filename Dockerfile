@@ -21,6 +21,10 @@ RUN apt-get update && apt-get install -y curl gnupg \
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir --upgrade -r requirements.txt
 
+# Install Playwright and its dependencies
+RUN pip install playwright
+RUN playwright install --with-deps chromium
+
 # Copy the entire backend directory contents into /app
 COPY backend/ .
 
