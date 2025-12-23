@@ -2,18 +2,21 @@
 
 # Startup script for Render deployment
 
-# Load NVM to ensure 'node' command is available
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-
 echo "Starting application..."
 
-# Start Proxy Service in background
-echo "Starting Proxy Service directly..."
+# Start Proxy Service in background on port 3001
+echo "Starting Proxy Service on port 3001..."
 cd proxy-service
-# Use 'nohup' and redirect output, ensuring node from NVM is used
+# Start proxy WITHOUT setting PORT env var (will use default 3001 from server.js)
 nohup node server.js > proxy.log 2>&1 &
+PROXY_PID=$!
+echo "Proxy started with PID: $PROXY_PID"
 cd ..
 
+# Wait a moment for proxy to bind to port
+sleep 3
+
 # Start the FastAPI application with optimized workers for Render Free Tier (512MB RAM)
-exec gunicorn -w 2 -k uvicorn.workers.UvicornWorker main:app --bind 0.0.0.0:$PORT
+# Using uvicorn worker directly via gunicorn on the main PORT (10000)
+echo "Starting FastAPI on port ${PORT}..."
+exec gunicorn -w 2 -k uvicorn.workers.UvicornWorker main:app --bind 0.0.0.0:${PORT}

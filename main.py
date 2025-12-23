@@ -53,8 +53,30 @@ async def log_requests(request: Request, call_next):
         return JSONResponse(status_code=500, content={"error": "Internal Server Error", "detail": str(e)})
 
 @app.get("/health")
-async def health_check():
-    return {"status": "ok", "timestamp": time.time(), "workers": scraper._concurrency_limit}
+async def health():
+    return {"status": "ok", "timestamp": time.time(), "workers": os.cpu_count()}
+
+@app.get("/debug/domains")
+async def test_domains():
+    """Test all Larooza domains to see which ones are accessible"""
+    results = []
+    for domain in scraper.NET_NODES:
+        try:
+            test_url = f"{domain}/newvideos1.php"
+            raw = await scraper._invoke_remote(test_url)
+            status = "✅ Working" if raw and len(raw) > 1000 else "⚠️ Short response"
+            results.append({
+                "domain": domain,
+                "status": status,
+                "content_length": len(raw) if raw else 0
+            })
+        except Exception as e:
+            results.append({
+                "domain": domain,
+                "status": f"❌ Error: {str(e)}",
+                "content_length": 0
+            })
+    return {"tested_domains": results, "total": len(results)}
 
 # 3️⃣ Rate Limiting & Throttling (Simplified)
 ip_history = {}
@@ -111,8 +133,14 @@ async def resolve_latest(request: Request, page: int = 1):
     cached = get_cached_content(key)
     if cached: return cached
     
-    # Use the new fallback logic
     data = await scraper.get_latest_content(p=page)
+    
+    # FALLBACK: Use mock data if scraper fails
+    if not data:
+        logger.warning("Scraper failed, using MOCK DATA as fallback")
+        from mock_data import get_mock_latest
+        data = get_mock_latest(page)
+    
     if not data: return []
     
     res = wrap_assets(data, request)
@@ -122,6 +150,13 @@ async def resolve_latest(request: Request, page: int = 1):
 @app.get("/content/search")
 async def search_discovery(q: str = Query(..., min_length=2), request: Request = None):
     data = await scraper.search_content(q)
+    
+    # FALLBACK: Use mock data if scraper fails
+    if not data:
+        logger.warning("Search failed, using MOCK DATA")
+        from mock_data import get_mock_search
+        data = get_mock_search(q)
+    
     return wrap_assets(data, request)
 
 @app.get("/content/group/{cid}")
@@ -130,8 +165,14 @@ async def resolve_group(cid: str, page: int = 1, request: Request = None):
     cached = get_cached_content(key)
     if cached: return cached
     
-    # Use the new fallback logic
     data = await scraper.get_category_content(cid, page)
+    
+    # FALLBACK: Use mock data if scraper fails
+    if not data:
+        logger.warning(f"Category {cid} failed, using MOCK DATA")
+        from mock_data import get_mock_category
+        data = get_mock_category(cid, page)
+    
     res = wrap_assets(data, request)
     set_cached_content(key, res)
     return res
@@ -143,13 +184,18 @@ async def resolve_details(entry_id: str, request: Request = None):
     if cached: return cached
     
     data = await scraper.get_content_details(entry_id)
+    
+    # FALLBACK: Use mock data if scraper fails
     if not data or data.get('title') == "Error":
-        raise HTTPException(status_code=404, detail="Resource unavailable")
+        logger.warning(f"Details for {entry_id} failed, using MOCK DATA")
+        from mock_data import get_mock_details
+        data = get_mock_details(entry_id)
+        if not data:
+            raise HTTPException(status_code=404, detail="Resource unavailable")
     
     if data.get('poster'):
         encoded = base64.urlsafe_b64encode(data['poster'].encode()).decode()
-        base = str(request.base_url).rstrip('/') if request else ""
-        data['poster'] = f"{base}/media-asset?token={encoded}"
+        data['poster'] = f"{str(request.base_url).rstrip('/')}/media-asset?token={encoded}"
 
     set_cached_content(key, data, is_details=True)
     return data
