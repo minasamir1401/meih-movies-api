@@ -15,12 +15,19 @@ RUN apt-get update && apt-get install -y curl gnupg \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first (for better caching)
-COPY requirements.txt .
+# Copy backend requirements first (for better caching)
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir --upgrade -r requirements.txt
 
-# Copy the entire application
-COPY . .
+# Install Playwright and its dependencies
+RUN pip install playwright
+RUN playwright install --with-deps chromium
+
+# Copy the entire backend directory contents into /app
+COPY backend/ .
+
+# Force copy the latest start_render.sh
+COPY backend/start_render.sh ./start_render.sh
 
 # Install Proxy dependencies
 RUN cd proxy-service && npm install

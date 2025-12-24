@@ -29,6 +29,7 @@ from collections import OrderedDict
 from urllib.parse import urljoin, urlparse, quote
 from bs4 import BeautifulSoup
 import aiohttp
+import orjson
 
 import os
 os.environ['UVLOOP'] = '0'
@@ -375,31 +376,49 @@ class ResourceResolver:
             return None, 0
     
     async def _tier4_node_proxy(self, url: str, timeout: int = 25000) -> Tuple[Optional[str], int]:
-        # TIER 4: Node.js Stealth Proxy with meta-redirect tracking
+        # TIER 4: Node.js Stealth Proxy with enhanced anti-blocking measures
         proxy_url = os.environ.get('NODE_PROXY_URL', 'http://localhost:3001')
         try:
             session = await self._get_session()
-            async with session.post(
-                f"{proxy_url}/fetch",
-                json={"url": url, "timeout": timeout},
-                timeout=25
-            ) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    html = data.get('html', '')
-                    status = data.get('status', 0)
-                    
-                    if html and len(html) > 500:
-                        # Follow meta refresh redirects often used by Larooza
-                        if '<meta' in html.lower() and 'refresh' in html.lower():
-                            refresh_match = re.search(r'url=([^"\'>]+)', html, re.IGNORECASE)
-                            if refresh_match:
-                                redirect_u = refresh_match.group(1).strip()
-                                if not redirect_u.startswith('http'):
-                                    redirect_u = urljoin(url, redirect_u)
-                                return await self._tier4_node_proxy(redirect_u, timeout)
-                        return html, status
-                return None, response.status
+            # Make multiple attempts with different parameters if needed
+            for attempt in range(3):
+                try:
+                    async with session.post(
+                        f"{proxy_url}/fetch",
+                        json={"url": url, "timeout": timeout},
+                        timeout=30  # Increase timeout for proxy requests
+                    ) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            html = data.get('html', '')
+                            status = data.get('status', 0)
+                            
+                            if html and len(html) > 100:  # Lower threshold to catch smaller valid responses
+                                # Follow meta refresh redirects often used by Larooza
+                                if '<meta' in html.lower() and 'refresh' in html.lower():
+                                    refresh_match = re.search(r'url=([^"\'>]+)', html, re.IGNORECASE)
+                                    if refresh_match:
+                                        redirect_u = refresh_match.group(1).strip()
+                                        if not redirect_u.startswith('http'):
+                                            redirect_u = urljoin(url, redirect_u)
+                                        return await self._tier4_node_proxy(redirect_u, timeout)
+                                return html, status
+                        elif response.status == 503:
+                            # Service temporarily unavailable, wait and retry
+                            await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                            continue
+                        else:
+                            logger.warning(f"Node.js proxy returned status {response.status} for {url}")
+                            return None, response.status
+                except Exception as e:
+                    if attempt == 2:  # Last attempt
+                        logger.warning(f"Node.js proxy error for {url} after 3 attempts: {e}")
+                        return None, 0
+                    else:
+                        # Wait before retrying
+                        await asyncio.sleep(2 ** attempt)
+                        continue
+            return None, 0
         except Exception as e:
             logger.warning(f"Node.js proxy error for {url}: {e}")
             return None, 0
@@ -566,16 +585,17 @@ class ResourceResolver:
                 logger.info(f"[TIER 1] Node.js proxy fetch ({node_proxy}): {endpoint[:60]}...")
                 content, status_code = await self._tier4_node_proxy(endpoint)
                 
-                if content and len(content) > 500:
+                if content and len(content) > 100:  # Lower threshold to accept more responses
                     is_blocked, reason = self._is_blocked(content, status_code)
                     if not is_blocked:
                         self._update_stats('tier1_success')
                         successful_tier = 1
+                        logger.info(f"[TIER 1] Success: {len(content)} bytes, status {status_code}")
                     else:
                         logger.warning(f"[TIER 1] Blocked: {reason}")
                         content = None
                 else:
-                    logger.warning(f"[TIER 1] Failed or empty response")
+                    logger.warning(f"[TIER 1] Failed or short response ({len(content) if content else 0} bytes)")
                     content = None
             
             # TIER 2: Direct HTTP (Fallback)

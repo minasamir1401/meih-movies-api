@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Query, Request, Depends, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, ORJSONResponse
 from scraper.engine import scraper
 import logging
 import asyncio
@@ -127,7 +127,7 @@ async def resolve_latest(request: Request, page: int = 1):
     # Manual rate limit check instead of middleware
     client_ip = request.client.host if request.client else "unknown"
     if not check_rate_limit(client_ip):
-        return []
+        return ORJSONResponse([])
 
     key = f"latest_p{page}"
     cached = get_cached_content(key)
@@ -141,11 +141,11 @@ async def resolve_latest(request: Request, page: int = 1):
         from mock_data import get_mock_latest
         data = get_mock_latest(page)
     
-    if not data: return []
+    if not data: return ORJSONResponse([])
     
     res = wrap_assets(data, request)
     set_cached_content(key, res)
-    return res
+    return ORJSONResponse(res)
 
 @app.get("/content/search")
 async def search_discovery(q: str = Query(..., min_length=2), request: Request = None):
@@ -157,7 +157,8 @@ async def search_discovery(q: str = Query(..., min_length=2), request: Request =
         from mock_data import get_mock_search
         data = get_mock_search(q)
     
-    return wrap_assets(data, request)
+    result = wrap_assets(data, request)
+    return ORJSONResponse(result)
 
 @app.get("/content/group/{cid}")
 async def resolve_group(cid: str, page: int = 1, request: Request = None):
@@ -175,7 +176,7 @@ async def resolve_group(cid: str, page: int = 1, request: Request = None):
     
     res = wrap_assets(data, request)
     set_cached_content(key, res)
-    return res
+    return ORJSONResponse(res)
 
 @app.get("/content/details/{entry_id}")
 async def resolve_details(entry_id: str, request: Request = None):
@@ -198,7 +199,7 @@ async def resolve_details(entry_id: str, request: Request = None):
         data['poster'] = f"{str(request.base_url).rstrip('/')}/media-asset?token={encoded}"
 
     set_cached_content(key, data, is_details=True)
-    return data
+    return ORJSONResponse(data)
 
 import aiohttp
 
@@ -237,7 +238,7 @@ async def proxy_asset(token: str):
                         content = await res.read()
                         media_type = res.headers.get("content-type", "image/jpeg")
                         set_cached_content(cache_key, {"content": content, "media_type": media_type}, is_image=True)
-                        return Response(content=content, media_type=media_type)
+                        return Response(content=content, media_type=media_type, headers={"Cache-Control": "public, max-age=86400"})
         except Exception as e:
             logger.warning(f"Direct Fetch Failed: {e}")
 
@@ -251,7 +252,7 @@ async def proxy_asset(token: str):
                         content = await res.read()
                         media_type = res.headers.get("content-type", "image/jpeg")
                         set_cached_content(cache_key, {"content": content, "media_type": media_type}, is_image=True)
-                        return Response(content=content, media_type=media_type)
+                        return Response(content=content, media_type=media_type, headers={"Cache-Control": "public, max-age=86400"})
         except Exception as e:
             logger.error(f"Local Proxy Failed: {e}")
             

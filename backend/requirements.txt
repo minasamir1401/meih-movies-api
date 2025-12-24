@@ -12,3 +12,5 @@ fake-useragent
 tenacity
 lxml
 nest_asyncio
+scraperapi-sdk
+playwright

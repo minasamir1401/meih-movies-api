@@ -19,4 +19,4 @@ sleep 3
 # Start the FastAPI application with optimized workers for Render Free Tier (512MB RAM)
 # Using uvicorn worker directly via gunicorn on the main PORT (10000)
 echo "Starting FastAPI on port ${PORT}..."
-exec gunicorn -w 2 -k uvicorn.workers.UvicornWorker main:app --bind 0.0.0.0:${PORT}
+exec gunicorn -w 2 -k uvicorn.workers.UvicornWorker --timeout 120 --keep-alive 5 --max-requests 1000 --max-requests-jitter 100 --worker-tmp-dir /dev/shm main:app --bind 0.0.0.0:${PORT}
