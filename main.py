@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Query, Request, Depends, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, ORJSONResponse
+from fastapi.responses import JSONResponse
 from scraper.engine import scraper
 import logging
 import asyncio
@@ -127,7 +127,7 @@ async def resolve_latest(request: Request, page: int = 1):
     # Manual rate limit check instead of middleware
     client_ip = request.client.host if request.client else "unknown"
     if not check_rate_limit(client_ip):
-        return ORJSONResponse([])
+        return []
 
     key = f"latest_p{page}"
     cached = get_cached_content(key)
@@ -137,15 +137,15 @@ async def resolve_latest(request: Request, page: int = 1):
     
     # FALLBACK: Use mock data if scraper fails
     if not data:
-        logger.warning("Scraper failed, using MOCK DATA as fallback")
-        from mock_data import get_mock_latest
-        data = get_mock_latest(page)
+        # from mock_data import get_mock_latest
+        # data = get_mock_latest(page)
+        return []
     
-    if not data: return ORJSONResponse([])
+    if not data: return []
     
     res = wrap_assets(data, request)
     set_cached_content(key, res)
-    return ORJSONResponse(res)
+    return res
 
 @app.get("/content/search")
 async def search_discovery(q: str = Query(..., min_length=2), request: Request = None):
@@ -153,12 +153,11 @@ async def search_discovery(q: str = Query(..., min_length=2), request: Request =
     
     # FALLBACK: Use mock data if scraper fails
     if not data:
-        logger.warning("Search failed, using MOCK DATA")
-        from mock_data import get_mock_search
-        data = get_mock_search(q)
+        # from mock_data import get_mock_search
+        # data = get_mock_search(q)
+        return []
     
-    result = wrap_assets(data, request)
-    return ORJSONResponse(result)
+    return wrap_assets(data, request)
 
 @app.get("/content/group/{cid}")
 async def resolve_group(cid: str, page: int = 1, request: Request = None):
@@ -170,13 +169,13 @@ async def resolve_group(cid: str, page: int = 1, request: Request = None):
     
     # FALLBACK: Use mock data if scraper fails
     if not data:
-        logger.warning(f"Category {cid} failed, using MOCK DATA")
-        from mock_data import get_mock_category
-        data = get_mock_category(cid, page)
+        # from mock_data import get_mock_category
+        # data = get_mock_category(cid, page)
+        return []
     
     res = wrap_assets(data, request)
     set_cached_content(key, res)
-    return ORJSONResponse(res)
+    return res
 
 @app.get("/content/details/{entry_id}")
 async def resolve_details(entry_id: str, request: Request = None):
@@ -187,10 +186,9 @@ async def resolve_details(entry_id: str, request: Request = None):
     data = await scraper.get_content_details(entry_id)
     
     # FALLBACK: Use mock data if scraper fails
-    if not data or data.get('title') == "Error":
-        logger.warning(f"Details for {entry_id} failed, using MOCK DATA")
-        from mock_data import get_mock_details
-        data = get_mock_details(entry_id)
+    if not data or data.get('title') == "Error" or data.get('title', '').strip() == "":
+        # from mock_data import get_mock_details
+        # data = get_mock_details(entry_id)
         if not data:
             raise HTTPException(status_code=404, detail="Resource unavailable")
     
@@ -199,7 +197,7 @@ async def resolve_details(entry_id: str, request: Request = None):
         data['poster'] = f"{str(request.base_url).rstrip('/')}/media-asset?token={encoded}"
 
     set_cached_content(key, data, is_details=True)
-    return ORJSONResponse(data)
+    return data
 
 import aiohttp
 
@@ -238,7 +236,7 @@ async def proxy_asset(token: str):
                         content = await res.read()
                         media_type = res.headers.get("content-type", "image/jpeg")
                         set_cached_content(cache_key, {"content": content, "media_type": media_type}, is_image=True)
-                        return Response(content=content, media_type=media_type, headers={"Cache-Control": "public, max-age=86400"})
+                        return Response(content=content, media_type=media_type)
         except Exception as e:
             logger.warning(f"Direct Fetch Failed: {e}")
 
@@ -252,7 +250,7 @@ async def proxy_asset(token: str):
                         content = await res.read()
                         media_type = res.headers.get("content-type", "image/jpeg")
                         set_cached_content(cache_key, {"content": content, "media_type": media_type}, is_image=True)
-                        return Response(content=content, media_type=media_type, headers={"Cache-Control": "public, max-age=86400"})
+                        return Response(content=content, media_type=media_type)
         except Exception as e:
             logger.error(f"Local Proxy Failed: {e}")
             
