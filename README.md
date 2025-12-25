@@ -1,46 +1,20 @@
-# MEIH Backend API - Optimized Version
+# MEIH Backend API
 
-This is the optimized backend API for the MEIH Netflix clone project, built with FastAPI.
-
-## Performance Improvements
-
-### Backend Optimizations
-- Updated to latest library versions for better performance
-- Implemented ORJSON for faster JSON serialization/deserialization
-- Added connection pooling and efficient request handling
-- Optimized caching with aiocache for better memory usage
-- Improved Gunicorn configuration for better resource utilization
-
-### Proxy Service Optimizations
-- Replaced http-proxy with more efficient undici library
-- Implemented connection pooling and keep-alive by default
-- Added timeout handling and retry logic with exponential backoff
-- Enhanced stealth headers to bypass anti-bot measures
-- Added multiple fallback mechanisms for reliability
-
-### Resource Usage Optimizations
-- Reduced CPU usage through efficient async processing
-- Minimized network overhead with connection reuse
-- Implemented aggressive caching to reduce repeated requests
-- Added request compression and decompression
-- Optimized image proxy with proper cache headers
+This is the backend API for the MEIH Netflix clone project, built with FastAPI.
 
 ## Features
 - Content scraping from various sources
 - RESTful API endpoints for content delivery
 - Caching mechanisms for improved performance
 - Multi-tier scraping with fallback strategies
-- Advanced anti-blocking measures
+- Automatic handling of meta refresh redirects
 
 ## Tech Stack
 - Python 3.10+
 - FastAPI
-- ORJSON for fast serialization
-- aiohttp for async requests
-- aiocache for efficient caching
-- BeautifulSoup4 for HTML parsing
-- Node.js proxy service with undici
-- uvicorn/gunicorn for deployment
+- BeautifulSoup4
+- aiohttp
+- uvicorn
 
 ## Setup Instructions
 
@@ -48,7 +22,6 @@ This is the optimized backend API for the MEIH Netflix clone project, built with
 2. Install dependencies:
    ```
    pip install -r requirements.txt
-   cd proxy-service && npm install
    ```
 
 3. Run the server:
@@ -69,10 +42,11 @@ This is the optimized backend API for the MEIH Netflix clone project, built with
 - `GET /content/group/{cid}` - Get content by category
 - `GET /content/details/{entry_id}` - Get detailed content information
 
+## Recent Fixes
+
+- Fixed handling of meta refresh redirects that were preventing content retrieval
+- Improved redirect following mechanism for better compatibility with source websites
+
 ## Deployment
 
-The backend is configured for deployment on Render with optimized settings:
-- Gunicorn with performance-tuned parameters
-- Worker connection pooling
-- Request limits to prevent abuse
-- Memory-optimized temporary directory usage
+The backend is configured for deployment on Render. See the `render.yaml` file for configuration details.
